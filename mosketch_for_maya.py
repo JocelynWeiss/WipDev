@@ -48,16 +48,18 @@ JOINTS_BUFFER = {}
 JOINTS_INIT_ORIENT_INV_BUFFER = {}
 JOINTS_ROTATE_AXIS_INV_BUFFER = {}
 INTER_JOINTS_BUFFER = {}
+JOINTS_UUIDS = {}
 
-ROOTS_SYSTEM = {}
+#ROOTS_SYSTEM = {}
 
 # Verbose level (1 for critical informations, 3 to output all packets)
 VERBOSE = 1
 
 # RIG Prefix
-PREFIX_FKX = "FKX"
+#PREFIX_FKX = "FKX"
 #PREFIX_FK = "FK"
-PREFIX_FK = "" # no advanced skeleton
+# This script is meant to work on Mosko_v5.1_FKIKCleaned.fbx loaded in Maya
+# So there is no need for any prefix nor suffix and there is no pre transform on root
 
 ################################################################################
 ##########          MAIN FUNCTIONS
@@ -112,7 +114,7 @@ def _create_gui():
 
     maya_window = _get_maya_main_window()
     MAIN_WINDOW = QtWidgets.QMainWindow(maya_window)
-    MAIN_WINDOW.setWindowTitle("MoskoNoRig 0.53")
+    MAIN_WINDOW.setWindowTitle("MoskoV51NoRig 0.54")
 
     content = QtWidgets.QWidget(MAIN_WINDOW)
     main_layout = QtWidgets.QVBoxLayout(content)
@@ -297,7 +299,6 @@ def _update_mosketch():
 
     global JSON_KEY_TYPE
     global JSON_KEY_NAME
-    global ROOTS_SYSTEM
     global JSON_KEY_ROTATION
     global JSON_KEY_TRANSLATION
 
@@ -315,36 +316,6 @@ def _update_mosketch():
         for maya_joint in joints_buffer_values:
             joint_data = {} # Reinit it
             idxName = maya_joint.name()
-            if idxName.startswith(PREFIX_FKX):
-                idxName = idxName.replace(PREFIX_FKX, "", 1)
-                #print maya_joint.name() + " - " + idxName
-            elif idxName.startswith(PREFIX_FK):
-                idxName = idxName.replace(PREFIX_FK, "", 1)
-                #print maya_joint.name() + " - " + idxName
-            elif idxName == "RootX_M":
-                joint_data[JSON_KEY_NAME] = idxName # Fill the Json key for the name
-                # For this controller we need to take an offset into account
-                #offset = ROOTS_SYSTEM["RootCenter_M"];
-                offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
-                oT = offset.getTranslation(space='transform')
-                # The root controller has an pre transform
-                #offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
-                oJO = offset.getRotation(space='transform', quaternion=True)
-                RO = JOINTS_ROTATE_AXIS_INV_BUFFER[idxName].inverse()
-                JO = JOINTS_INIT_ORIENT_INV_BUFFER[idxName].inverse()
-                quat = maya_joint.getRotation(space='transform', quaternion=True)
-                quat = oJO * RO * quat * JO * oJO.inverse()
-                joint_data[JSON_KEY_ROTATION] = [quat[0], quat[1], quat[2], quat[3]]
-
-                translation = maya_joint.getTranslation(space='transform')
-                translation += oT
-                translation *= 0.01 # Mosketch uses meters. Maya uses centimeters
-                joint_data[JSON_KEY_TRANSLATION] = [translation[0], translation[1], translation[2]]
-                joints_stream['Joints'].append(joint_data)
-                continue
-            else:
-                continue
-
             joint_data[JSON_KEY_NAME] = idxName # Fill the Json key for the name
 
             # W = [S] * [RO] * [R] * [JO] * [IS] * [T]
@@ -452,6 +423,8 @@ def _process_data(arg):
             _process_hierarchy(data)
         elif data['Type'] == "JointsStream":
             _process_joints_stream(data)
+        elif data['Type'] == "JointsUuids":
+            _process_joints_uuids(data)
         else:
             _print_error("Unknown data type received: " + data['Type'])
     except ValueError:
@@ -468,7 +441,6 @@ def _process_hierarchy(hierarchy_data):
     global JOINTS_BUFFER
     global JOINTS_INIT_ORIENT_INV_BUFFER
     global JOINTS_ROTATE_AXIS_INV_BUFFER
-    global ROOTS_SYSTEM
 
     try:
         # First empty JOINTS_BUFFER
@@ -483,20 +455,7 @@ def _process_hierarchy(hierarchy_data):
         joints_name = hierarchy_data["Joints"]
 
         for joint_name in joints_name:
-            # In Advanced Skeleton Joint's controllers are prefixed with 'FK'
-            prefixedName = PREFIX_FK + joint_name
-            # except for RooX_M which we want
-            if joint_name == "RootX_M":
-                prefixedName = joint_name
-            # for the neck controller we want to map our joints to xtra joints
-            if (joint_name == "Neck_M"):
-                prefixedName = PREFIX_FKX + joint_name
-            if (joint_name == "NeckPart1_M"):
-                prefixedName = PREFIX_FKX + joint_name
-            if (joint_name == "NeckPart2_M"):
-                prefixedName = PREFIX_FKX + joint_name
-            #---
-            maya_joints = [maya_joint for maya_joint in all_maya_joints if maya_joint.name() == prefixedName]
+            maya_joints = [maya_joint for maya_joint in all_maya_joints if maya_joint.name() == joint_name]
             if maya_joints:
                 # We should have one Maya joint mapped anyways
                 if len(maya_joints) != 1:
@@ -506,7 +465,6 @@ def _process_hierarchy(hierarchy_data):
                 _map_joint(joint_name, maya_joint)
 
         _send_ack_hierarchy_initialized()
-        _send_initial_mosketch_orient(True)
 
         # Print nb joints in Maya and nb joints in BUFFER for information purposes
         _print_success("mapped " + str(len(JOINTS_BUFFER)) + " maya joints out of " + str(len(all_maya_joints)))
@@ -516,20 +474,6 @@ def _process_hierarchy(hierarchy_data):
         _print_error("cannot process hierarchy data (" + type(e).__name__ + ": " + str(e) +")")
     #_send_inter_joints()
     #_send_static_inter_joints()
-
-    # Look for our root offset
-    for maya_joint in all_maya_joints:
-        if (maya_joint.name() == "FKOffsetRoot_M"):
-            _print_verbose("we have our root pre transform", 1)
-            ROOTS_SYSTEM[maya_joint.name()] = maya_joint
-            '''
-        elif (maya_joint.name() == "RootCenter_M"):
-            _print_verbose("we have our root centre", 1)
-            ROOTS_SYSTEM[maya_joint.name()] = maya_joint
-        elif (maya_joint.name() == "RootSystem"):
-            _print_verbose("we have our RootSystem", 1)
-            ROOTS_SYSTEM[maya_joint.name()] = maya_joint
-            '''
 
 
 ################################################################################
@@ -555,6 +499,8 @@ def _map_joint(mosketchName, maya_joint):
 
 ################################################################################
 ##########          Send joints that should be non sketchable
+#Used only on rigged character. We try to automatically detect inter joints
+#Deprecated
 ################################################################################
 def _send_inter_joints():
     global JOINTS_BUFFER
@@ -593,7 +539,7 @@ def _send_inter_joints():
 
 
 ################################################################################
-##########          Send joints that should be non sketchable
+##########          Send joints that should be non sketchable in one big message
 ################################################################################
 def _send_static_inter_joints():
     joints_stream = {}
@@ -645,15 +591,7 @@ def _process_joints_stream(joints_stream_data):
                 # W = [S] * [RO] * [R] * [JO] * [IS] * [T]
                 RO = JOINTS_ROTATE_AXIS_INV_BUFFER[joint_name]
                 JO = JOINTS_INIT_ORIENT_INV_BUFFER[joint_name]
-                if (joint_name == "RootX_M"):
-                    # The root controller has an pre transform
-                    offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
-                    #axis = offset.getRotateAxis()
-                    #oRO = pmc.datatypes.EulerRotation(axis[0], axis[1], axis[2]).asQuaternion()
-                    oJO = offset.getRotation(space='transform', quaternion=True)
-                    quat = oJO.inverse() * RO * quat * JO * oJO
-                else:
-                    quat = RO * quat * JO
+                quat = RO * quat * JO
                 maya_joint.setRotation(quat, space='transform')
                 
                 joint_type = joint_data[JSON_KEY_ANATOMIC]                
@@ -662,10 +600,6 @@ def _process_joints_stream(joints_stream_data):
                     trans = trans.rotateBy(RO)
                     # Mosketch uses meters. Maya uses centimeters
                     trans *= 100
-                    if (joint_name == "RootX_M"):
-                        offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
-                        oT = offset.getTranslation(space='transform')
-                        trans -= oT
                     maya_joint.setTranslation(trans, space='transform')
 
         _send_ack_jointstream_received()
@@ -677,12 +611,135 @@ def _process_joints_stream(joints_stream_data):
 
 
 ################################################################################
-##########          Send Mosketch initial orientation Mode
+##########          Send Mosketch initial orientation Mode through a command
+#in orientMode [0 or 1]
 ################################################################################
-def _send_initial_mosketch_orient(orientMode):
+def _send_command_orientMode(orientMode):
+    global CONNECTION
     packet = {}
-    packet['Type'] = "OrientMode"
-    packet['Mode'] = orientMode
-    json_data = json.dumps(packet)
+    packet[JSON_KEY_TYPE] = "MoCommand"
+    packet['object'] = 'scene'
+    packet['command'] = 'setStreamingJointOrientMode'
+
+    jsonObj = {}
+    jsonObj['jointOrientMode'] = str(orientMode)
+    packet['parameters'] = jsonObj # we need parameters to be a json object
+
+    #json_data = json.dumps(packet)
+    json_data = json.dumps([packet]) # [] specific for commands that could be buffered
     CONNECTION.write(json_data)
-    _print_verbose("_send_initial_mosketch_orient", 1)
+    CONNECTION.flush()
+    _print_verbose("_send_command_orientMode", 1)
+
+
+################################################################################
+##########          Set wireframe visibility in Mosketch through a command
+#in visible [true or false]
+################################################################################
+def _send_command_wireframe(visible):
+    global CONNECTION
+    packet = {}
+    packet[JSON_KEY_TYPE] = "MoCommand"
+    packet['object'] = 'scene'
+    packet['command'] = 'setWireframeVisibility'
+
+    jsonObj = {}
+    jsonObj['visible'] = visible
+    packet['parameters'] = jsonObj # we need parameters to be a json object
+
+    #json_data = json.dumps(packet)
+    json_data = json.dumps([packet]) # [] specific for commands that could be buffered
+    CONNECTION.write(json_data)
+    CONNECTION.flush()
+    #https://doc.qt.io/qt-5/qabstractsocket.html#flush
+    _print_verbose("_send_command_wireframe", 1)
+
+
+################################################################################
+##########          Receiving all the Mosketch's joints uuids
+################################################################################
+def _process_joints_uuids(data):
+    _print_verbose("_process_joints_uuids", 1)
+    global JOINTS_UUIDS
+
+    try:
+        joints_data = data[JSON_KEY_JOINTS]
+        _print_verbose(joints_data, 3)
+
+        for joint_data in joints_data:
+            for name in joint_data:
+                JOINTS_UUIDS[name] = joint_data[name]
+                #print name + ':' + JOINTS_UUIDS[name]
+
+    except Exception as e:
+        _print_error("cannot process joints uuids (" + type(e).__name__ + ": " + str(e) +")")
+
+    print "Total uuids: " + str(len(JOINTS_UUIDS))
+    #print JOINTS_UUIDS['RootX_M']
+    #print JOINTS_UUIDS['Spine2_M']
+    #print JOINTS_UUIDS['Spine3_M']
+    #_send_command_selectJoint('toto') #just for testing an error message
+    #_send_command_selectJoint('Wrist_L')
+    _send_command_orientMode(1)
+    #_send_command_wireframe('true')
+    #_send_command_setSketchable(JOINTS_UUIDS['Spine2_M'], 'false')
+    #_send_command_setSketchable(JOINTS_UUIDS['Spine3_M'], 'false')
+
+
+################################################################################
+##########          Set a joint sketchable through a command
+#in uuid
+#in sketchable [true or false]
+################################################################################
+def _send_command_setSketchable(uuid, sketchable):
+    global CONNECTION
+    packet = {}
+    packet[JSON_KEY_TYPE] = "MoCommand"
+    packet['object'] = 'joint'
+    packet['command'] = 'setSketchable'
+
+    jsonObj = {}
+    jsonObj['uuid'] = uuid
+    jsonObj['sketchable'] = sketchable
+    packet['parameters'] = jsonObj # we need parameters to be a json object
+
+    json_data = json.dumps([packet]) # [] specific for commands that could be buffered
+    CONNECTION.write(json_data)
+    #print 'before= ' + str(CONNECTION.bytesToWrite())
+    CONNECTION.flush()
+    _print_verbose("_send_command_setSketchable", 1)
+    #print 'after= ' + str(CONNECTION.bytesToWrite())
+
+
+################################################################################
+##########          Select a joint by name through a command
+#in jointName
+################################################################################
+def _send_command_selectJoint(jointName):
+    global CONNECTION
+
+    try:
+        uuid = JOINTS_UUIDS[jointName]
+    except Exception as e:
+        _print_error("cannot find joint uuid for (" + type(e).__name__ + ": " + str(e) +")")
+        return
+
+    packet = {}
+    packet[JSON_KEY_TYPE] = "MoCommand"
+    packet['object'] = 'scene'
+    packet['command'] = 'selectByUuid'
+
+    jsonObj = {}
+    jsonObj['uuid'] = uuid
+    jsonObj['eraseGroup'] = '1' # '0' or '1'
+    jsonObj['toggleIfSelected'] = '1' # '0' or '1'
+    packet['parameters'] = jsonObj # we need parameters to be a json object
+
+    json_data = json.dumps([packet]) # [] specific for commands that could be buffered
+    CONNECTION.write(json_data)
+    CONNECTION.flush()
+    _print_verbose("_send_command_selectJoint", 1)
+
+
+################################################################################
+################################################################################
