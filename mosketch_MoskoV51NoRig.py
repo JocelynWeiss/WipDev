@@ -114,7 +114,7 @@ def _create_gui():
 
     maya_window = _get_maya_main_window()
     MAIN_WINDOW = QtWidgets.QMainWindow(maya_window)
-    MAIN_WINDOW.setWindowTitle("MoskoV51NoRig 0.53")
+    MAIN_WINDOW.setWindowTitle("MoskoV51NoRig 0.54")
 
     content = QtWidgets.QWidget(MAIN_WINDOW)
     main_layout = QtWidgets.QVBoxLayout(content)
@@ -465,8 +465,6 @@ def _process_hierarchy(hierarchy_data):
                 _map_joint(joint_name, maya_joint)
 
         _send_ack_hierarchy_initialized()
-        #_send_initial_mosketch_orient(True)
-        #_send_command_orientMode(1)
 
         # Print nb joints in Maya and nb joints in BUFFER for information purposes
         _print_success("mapped " + str(len(JOINTS_BUFFER)) + " maya joints out of " + str(len(all_maya_joints)))
@@ -501,6 +499,8 @@ def _map_joint(mosketchName, maya_joint):
 
 ################################################################################
 ##########          Send joints that should be non sketchable
+#Used only on rigged character. We try to automatically detect inter joints
+#Deprecated
 ################################################################################
 def _send_inter_joints():
     global JOINTS_BUFFER
@@ -539,7 +539,7 @@ def _send_inter_joints():
 
 
 ################################################################################
-##########          Send joints that should be non sketchable
+##########          Send joints that should be non sketchable in one big message
 ################################################################################
 def _send_static_inter_joints():
     joints_stream = {}
@@ -611,18 +611,6 @@ def _process_joints_stream(joints_stream_data):
 
 
 ################################################################################
-##########          Send Mosketch initial orientation Mode
-################################################################################
-def _send_initial_mosketch_orient(orientMode):
-    packet = {}
-    packet['Type'] = "OrientMode"
-    packet['Mode'] = orientMode
-    json_data = json.dumps(packet)
-    CONNECTION.write(json_data)
-    _print_verbose("_send_initial_mosketch_orient", 1)
-
-
-################################################################################
 ##########          Send Mosketch initial orientation Mode through a command
 #in orientMode [0 or 1]
 ################################################################################
@@ -687,15 +675,15 @@ def _process_joints_uuids(data):
         _print_error("cannot process joints uuids (" + type(e).__name__ + ": " + str(e) +")")
 
     print "Total uuids: " + str(len(JOINTS_UUIDS))
-    print JOINTS_UUIDS['RootX_M']
-    print JOINTS_UUIDS['Spine2_M']
-    print JOINTS_UUIDS['Spine3_M']
-    _send_command_selectJoint('toto')
-    _send_command_selectJoint('Wrist_L')
+    #print JOINTS_UUIDS['RootX_M']
+    #print JOINTS_UUIDS['Spine2_M']
+    #print JOINTS_UUIDS['Spine3_M']
+    #_send_command_selectJoint('toto') #just for testing an error message
+    #_send_command_selectJoint('Wrist_L')
     _send_command_orientMode(1)
-    _send_command_wireframe('true')
-    _send_command_setSketchable(JOINTS_UUIDS['Spine2_M'], 'false')
-    _send_command_setSketchable(JOINTS_UUIDS['Spine3_M'], 'false')
+    #_send_command_wireframe('true')
+    #_send_command_setSketchable(JOINTS_UUIDS['Spine2_M'], 'false')
+    #_send_command_setSketchable(JOINTS_UUIDS['Spine3_M'], 'false')
 
 
 ################################################################################

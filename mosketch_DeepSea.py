@@ -50,6 +50,7 @@ JOINTS_BUFFER = {}
 JOINTS_INIT_ORIENT_INV_BUFFER = {}
 JOINTS_ROTATE_AXIS_INV_BUFFER = {}
 INTER_JOINTS_BUFFER = {}
+JOINTS_UUIDS = {}
 
 ROOTS_SYSTEM = {}
 
@@ -113,7 +114,7 @@ def _create_gui():
 
     maya_window = _get_maya_main_window()
     MAIN_WINDOW = QtWidgets.QMainWindow(maya_window)
-    MAIN_WINDOW.setWindowTitle("DeepSea 0.51")
+    MAIN_WINDOW.setWindowTitle("DeepSea 0.54")
 
     content = QtWidgets.QWidget(MAIN_WINDOW)
     main_layout = QtWidgets.QVBoxLayout(content)
@@ -452,6 +453,8 @@ def _process_data(arg):
             _process_hierarchy(data)
         elif data['Type'] == "JointsStream":
             _process_joints_stream(data)
+        elif data['Type'] == "JointsUuids":
+            _process_joints_uuids(data)
         else:
             _print_error("Unknown data type received: " + data['Type'])
     except ValueError:
@@ -1117,3 +1120,28 @@ def _process_joints_stream(joints_stream_data):
     except Exception as e:
         _print_error("cannot process joints stream (" + type(e).__name__ + ": " + str(e) +")")
 
+
+################################################################################
+##########          Receiving all the Mosketch's joints uuids
+################################################################################
+def _process_joints_uuids(data):
+    _print_verbose("_process_joints_uuids", 1)
+    global JOINTS_UUIDS
+
+    try:
+        joints_data = data[JSON_KEY_JOINTS]
+        _print_verbose(joints_data, 3)
+
+        for joint_data in joints_data:
+            for name in joint_data:
+                JOINTS_UUIDS[name] = joint_data[name]
+                #print name + ':' + JOINTS_UUIDS[name]
+
+    except Exception as e:
+        _print_error("cannot process joints uuids (" + type(e).__name__ + ": " + str(e) +")")
+
+    print "Total uuids: " + str(len(JOINTS_UUIDS))
+
+
+################################################################################
+################################################################################
