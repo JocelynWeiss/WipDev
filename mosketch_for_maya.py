@@ -42,6 +42,9 @@ JSON_KEY_ANATOMIC = "Anatom"
 JSON_KEY_ROTATION = "LR"
 JSON_KEY_TRANSLATION = "LT"
 JSON_KEY_JOINTS = "Joints"
+JSON_KEY_OBJECT = "object"
+JSON_KEY_COMMAND = "command"
+JSON_KEY_PARAMETERS = "parameters"
 
 # MAYA JOINTS BUFFERS
 JOINTS_BUFFER = {}
@@ -49,8 +52,6 @@ JOINTS_INIT_ORIENT_INV_BUFFER = {}
 JOINTS_ROTATE_AXIS_INV_BUFFER = {}
 INTER_JOINTS_BUFFER = {}
 JOINTS_UUIDS = {}
-
-#ROOTS_SYSTEM = {}
 
 # Verbose level (1 for critical informations, 3 to output all packets)
 VERBOSE = 1
@@ -373,7 +374,7 @@ def _send_ack_jointstream_received():
         return
     try:
         ack_packet = {}
-        ack_packet['Type'] = "JointsStreamAck"
+        ack_packet[JSON_KEY_TYPE] = "JointsStreamAck"
         json_data = json.dumps(ack_packet)
         CONNECTION.write(json_data)
         #_print_verbose("JointsStreamAck sent", 1)
@@ -419,14 +420,14 @@ def _process_data(arg):
     try:
         data = json.loads(arg)
 
-        if data['Type'] == "Hierarchy":
+        if data[JSON_KEY_TYPE] == "Hierarchy":
             _process_hierarchy(data)
-        elif data['Type'] == "JointsStream":
+        elif data[JSON_KEY_TYPE] == "JointsStream":
             _process_joints_stream(data)
-        elif data['Type'] == "JointsUuids":
+        elif data[JSON_KEY_TYPE] == "JointsUuids":
             _process_joints_uuids(data)
         else:
-            _print_error("Unknown data type received: " + data['Type'])
+            _print_error("Unknown data type received: " + data[JSON_KEY_TYPE])
     except ValueError:
         _print_verbose("Received a non-Json object." + sys.exc_info()[0] + sys.exc_info()[1], 1)
         return
@@ -472,7 +473,6 @@ def _process_hierarchy(hierarchy_data):
 
     except Exception as e:
         _print_error("cannot process hierarchy data (" + type(e).__name__ + ": " + str(e) +")")
-    #_send_inter_joints()
     #_send_static_inter_joints()
 
 
@@ -495,47 +495,6 @@ def _map_joint(mosketchName, maya_joint):
         JO = maya_joint.getRotation(space='transform', quaternion=True).inverse()
         JOINTS_INIT_ORIENT_INV_BUFFER[mosketchName] = JO
         _print_verbose("t: " + mosketchName + " - " + maya_joint.name() + " " + str(RO[0]) + " " + str(RO[1]) + " " + str(RO[2]) + " " + str(RO[3]) + "; " + str(JO[0]) + " " + str(JO[1]) + " " + str(JO[2]) + " " + str(JO[3]), 2)
-
-
-################################################################################
-##########          Send joints that should be non sketchable
-#Used only on rigged character. We try to automatically detect inter joints
-#Deprecated
-################################################################################
-def _send_inter_joints():
-    global JOINTS_BUFFER
-    global INTER_JOINTS_BUFFER
-    #print "_send_inter_joints"
-    all_maya_joints = pmc.ls(type="joint")
-    joints_buffer_values = JOINTS_BUFFER.values()
-    for maya_joint in all_maya_joints:
-        index = 0
-        found = False
-        for moJoint in joints_buffer_values:
-            if "FK" + maya_joint.name() == moJoint.name():
-                #print "Found " + moJoint.name()
-                last_name = moJoint.name()
-                found = True
-                break
-            else:
-                index = index + 1
-        if found == True:
-            joints_buffer_values.remove(last_name)
-        else:
-            INTER_JOINTS_BUFFER[maya_joint.name()] = maya_joint
-            print "+Inter " + INTER_JOINTS_BUFFER[maya_joint.name()].name() + " n= " + str(len(joints_buffer_values))
-    print "Total inter joints found: " + str(len(INTER_JOINTS_BUFFER))
-    all_values = INTER_JOINTS_BUFFER.values()
-    joints_stream = {}
-    joints_stream[JSON_KEY_TYPE] = "InterJoints"
-    joints_stream[JSON_KEY_JOINTS] = []
-    for maya_joint in all_values:
-        joint_data = {} # Reinit it
-        joint_data[JSON_KEY_NAME] = maya_joint.name()
-        joints_stream[JSON_KEY_JOINTS].append(joint_data)
-        #print "Appending " + str(joint_data[JSON_KEY_NAME])
-    json_data = json.dumps(joints_stream)
-    CONNECTION.write(json_data)
 
 
 ################################################################################
@@ -575,7 +534,7 @@ def _process_joints_stream(joints_stream_data):
     global JSON_KEY_TRANSLATION
 
     try:
-        joints_data = joints_stream_data["Joints"]
+        joints_data = joints_stream_data[JSON_KEY_JOINTS]
         _print_verbose(joints_data, 3)
 
         for joint_data in joints_data:
@@ -618,12 +577,12 @@ def _send_command_orientMode(orientMode):
     global CONNECTION
     packet = {}
     packet[JSON_KEY_TYPE] = "MoCommand"
-    packet['object'] = 'scene'
-    packet['command'] = 'setStreamingJointOrientMode'
+    packet[JSON_KEY_OBJECT] = 'scene'
+    packet[JSON_KEY_COMMAND] = 'setStreamingJointOrientMode'
 
     jsonObj = {}
     jsonObj['jointOrientMode'] = str(orientMode)
-    packet['parameters'] = jsonObj # we need parameters to be a json object
+    packet[JSON_KEY_PARAMETERS] = jsonObj # we need parameters to be a json object
 
     #json_data = json.dumps(packet)
     json_data = json.dumps([packet]) # [] specific for commands that could be buffered
@@ -640,18 +599,17 @@ def _send_command_wireframe(visible):
     global CONNECTION
     packet = {}
     packet[JSON_KEY_TYPE] = "MoCommand"
-    packet['object'] = 'scene'
-    packet['command'] = 'setWireframeVisibility'
+    packet[JSON_KEY_OBJECT] = 'scene'
+    packet[JSON_KEY_COMMAND] = 'setWireframeVisibility'
 
     jsonObj = {}
     jsonObj['visible'] = visible
-    packet['parameters'] = jsonObj # we need parameters to be a json object
+    packet[JSON_KEY_PARAMETERS] = jsonObj # we need parameters to be a json object
 
     #json_data = json.dumps(packet)
     json_data = json.dumps([packet]) # [] specific for commands that could be buffered
     CONNECTION.write(json_data)
     CONNECTION.flush()
-    #https://doc.qt.io/qt-5/qabstractsocket.html#flush
     _print_verbose("_send_command_wireframe", 1)
 
 
@@ -675,10 +633,6 @@ def _process_joints_uuids(data):
         _print_error("cannot process joints uuids (" + type(e).__name__ + ": " + str(e) +")")
 
     print "Total uuids: " + str(len(JOINTS_UUIDS))
-    #print JOINTS_UUIDS['RootX_M']
-    #print JOINTS_UUIDS['Spine2_M']
-    #print JOINTS_UUIDS['Spine3_M']
-    #_send_command_selectJoint('toto') #just for testing an error message
     #_send_command_selectJoint('Wrist_L')
     _send_command_orientMode(1)
     #_send_command_wireframe('true')
@@ -695,13 +649,13 @@ def _send_command_setSketchable(uuid, sketchable):
     global CONNECTION
     packet = {}
     packet[JSON_KEY_TYPE] = "MoCommand"
-    packet['object'] = 'joint'
-    packet['command'] = 'setSketchable'
+    packet[JSON_KEY_OBJECT] = 'joint'
+    packet[JSON_KEY_COMMAND] = 'setSketchable'
 
     jsonObj = {}
     jsonObj['uuid'] = uuid
     jsonObj['sketchable'] = sketchable
-    packet['parameters'] = jsonObj # we need parameters to be a json object
+    packet[JSON_KEY_PARAMETERS] = jsonObj # we need parameters to be a json object
 
     json_data = json.dumps([packet]) # [] specific for commands that could be buffered
     CONNECTION.write(json_data)
@@ -726,14 +680,14 @@ def _send_command_selectJoint(jointName):
 
     packet = {}
     packet[JSON_KEY_TYPE] = "MoCommand"
-    packet['object'] = 'scene'
-    packet['command'] = 'selectByUuid'
+    packet[JSON_KEY_OBJECT] = 'scene'
+    packet[JSON_KEY_COMMAND] = 'selectByUuid'
 
     jsonObj = {}
     jsonObj['uuid'] = uuid
     jsonObj['eraseGroup'] = '1' # '0' or '1'
     jsonObj['toggleIfSelected'] = '1' # '0' or '1'
-    packet['parameters'] = jsonObj # we need parameters to be a json object
+    packet[JSON_KEY_PARAMETERS] = jsonObj # we need parameters to be a json object
 
     json_data = json.dumps([packet]) # [] specific for commands that could be buffered
     CONNECTION.write(json_data)
