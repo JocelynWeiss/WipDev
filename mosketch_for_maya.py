@@ -30,8 +30,8 @@ else:
     _print_error("cannot find Qt bindings")
 
 # Global variables
+SCRIPT_VER = "0.56"
 MAIN_WINDOW = None
-STATUS_TEXT = None
 CONNECTION = None
 IP = "127.0.0.1"
 MOSKETCH_PORT = 16094
@@ -53,6 +53,9 @@ JOINTS_INIT_ORIENT_INV_BUFFER = {}
 JOINTS_ROTATE_AXIS_INV_BUFFER = {}
 INTER_JOINTS_BUFFER = {}
 JOINTS_UUIDS = {}
+CONTROLLERS_BUFFER = {}
+CONTROLLERS_INIT_ORIENT_INV_BUFFER = {}
+CONTROLLERS_ROTATE_AXIS_INV_BUFFER = {}
 
 # Verbose level (1 for critical informations, 3 to output all packets)
 VERBOSE = 1
@@ -70,6 +73,28 @@ PREFIX_FK = ""
 MODEL_NAME = "Mosko_noRig"
 #MODEL_NAME = "Mosko_Rigged"
 #MODEL_NAME = "DeepSea_Rigged"
+
+
+################################################################################
+# Array of DeepSea joints name that need FKX prefix instead of FK
+################################################################################
+DEEPSEA_FKX_BIND = [
+  "BodyFinSide2_L", "BodyFinSide2Part1_L", "BodyFinSide2Part2_L", "BodyFinSide3_L", "BodyFinSide3Part1_L", "BodyFinSide3Part2_L",
+  "finSide_L", "finSidePart1_L", "finSidePart2_L", "finSide2_L", "finSide2Part1_L", "finSide2Part2_L",
+  "finSide4_L", "finSide4Part1_L", "finSide4Part2_L", "BodyFinLowerA_L", "BodyFinLowerAPart1_L", "BodyFinLowerAPart2_L",
+  "BodyFinLowerA1_L", "BodyFinLowerA1Part1_L", "BodyFinLowerA1Part2_L", "BodyFinLowerB_L", "BodyFinLowerBPart1_L", "BodyFinLowerBPart2_L",
+  "BodyFinLowerB1_L", "BodyFinLowerB1Part1_L", "BodyFinLowerB1Part2_L", "BackE_M", "BackEPart1_M", "BackEPart2_M", "BackEPart3_M", "BackEPart4_M",
+  "tailMain1_M", "tailMain1Part1_M", "tailMain1Part2_M", "tailMain1Part3_M", "tailMain1Part4_M", "tailMain2_M", "tailMain2Part1_M",
+  "tailMain2Part2_M", "tailMain2Part3_M", "tailMain2Part4_M", "tailMain3_M", "tailMain3Part1_M", "tailMain3Part2_M", "tailMain3Part3_M",
+  "tailMain3Part4_M", "tailMain4_M", "tailMain4Part1_M", "tailMain4Part2_M", "tailMain4Part3_M", "tailMain4Part4_M",
+  "BodyFinUpper4_M", "BodyFinUpper4Part1_M", "BodyFinUpper4Part2_M", "BodyFinUpper5_M", "BodyFinUpper5Part1_M", "BodyFinUpper5Part2_M",
+  "bodyFinUpper1_M", "bodyFinUpper1Part1_M", "bodyFinUpper2_M", "bodyFinUpper2Part1_M", "BodyFinUpper1_M", "BodyFinUpper1Part1_M",
+  "BodyFinUpper2_M", "BodyFinUpper2Part1_M", "BodyFinSide2_R", "BodyFinSide2Part1_R", "BodyFinSide2Part2_R", "BodyFinSide3_R",
+  "BodyFinSide3Part1_R", "BodyFinSide3Part2_R", "finSide_R", "finSidePart1_R", "finSidePart2_R", "finSide2_R", "finSide2Part1_R", "finSide2Part2_R",
+  "finSide4_R", "finSide4Part1_R", "finSide4Part2_R", "BodyFinLowerA_R", "BodyFinLowerAPart1_R", "BodyFinLowerAPart2_R", "BodyFinLowerA1_R",
+  "BodyFinLowerA1Part1_R", "BodyFinLowerA1Part2_R", "BodyFinLowerB_R", "BodyFinLowerBPart1_R", "BodyFinLowerBPart2_R",
+  "BodyFinLowerB1_R", "BodyFinLowerB1Part1_R", "BodyFinLowerB1Part2_R"
+]
 
 
 ################################################################################
@@ -91,18 +116,22 @@ def install():
     pmc.shelfButton(label='Start',
                     parent=shelf_layout, 
                     image1=start_icon_name, 
-                    command='import mosketch_for_maya;reload(mosketch_for_maya);mosketch_for_maya.start()')
+                    command='import mosketch_for_maya;reload(mosketch_for_maya);mosketch_for_maya.start("noRig")')
     pmc.shelfButton(label='Stop',
                     parent=shelf_layout,
                     image1=stop_icon_name,
                     command='mosketch_for_maya.stop()')
 
 
+################################################################################
+# shelf start button
+#in model_name must be a string to specify a model
+################################################################################
 def start(model_name):
     """
     Call this function from Maya (in a shelf button or in script editor for example):
         import mosketch_for_maya
-        mosketch_for_maya.start()
+        mosketch_for_maya.start("noRig")
         model_name can be "" or "noRig" for non-rigged characters
           "Rig" for Mosko_Rigged
           "Deep" for DeepSea_Rigged
@@ -119,6 +148,9 @@ def start(model_name):
     _create_gui()
 
 
+################################################################################
+# shelf stop button
+################################################################################
 def stop():
     """
     Call this function from Maya (in a shelf button or in script editor for example):
@@ -130,65 +162,80 @@ def stop():
 
     _destroy_gui()
 
+
+################################################################################
+# Class definition for UI
+################################################################################
+class UI_MosketchWindow(QtWidgets.QMainWindow):
+    def __init__(self, parent=None):
+        maya_window = _get_maya_main_window()
+        super(UI_MosketchWindow, self).__init__(maya_window)
+
+    def init_mosketch_ui(self):
+        print "Init UI window"
+        self.setWindowTitle(MODEL_NAME + SCRIPT_VER)
+
+        content = QtWidgets.QWidget(MAIN_WINDOW)
+        main_layout = QtWidgets.QVBoxLayout(content)
+
+        help_text = QtWidgets.QLabel(content)
+        help_text.setWordWrap(True)
+
+        help_text.setText("""<br>
+        <b>Please read <a href='https://github.com/MokaStudio/MosketchForMaya' style=\"color: #F16521;\"> documentation</a> first.</b>
+        <br>""")
+        help_text.setOpenExternalLinks(True)
+
+        ip_label = QtWidgets.QLabel("IP", content)
+        ip_lineedit = QtWidgets.QLineEdit(content)
+        ip_lineedit.setText(IP)
+        ip_lineedit.textChanged.connect(_ip_text_changed)
+        ip_layout = QtWidgets.QHBoxLayout()
+        ip_layout.addWidget(ip_label)
+        ip_layout.addWidget(ip_lineedit)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        connect_button = QtWidgets.QToolButton(content)
+        connect_button.setText("CONNECT")
+        connect_button.clicked.connect(_open_connection)
+        buttons_layout.addWidget(connect_button)
+        disconnect_button = QtWidgets.QToolButton(content)
+        disconnect_button.setText("DISCONNECT")
+        disconnect_button.clicked.connect(_close_connection)
+        buttons_layout.addWidget(disconnect_button)
+        update_mosketch_button = QtWidgets.QToolButton(content)
+        update_mosketch_button.setText("UPDATE MOSKETCH")
+        update_mosketch_button.setCheckable(False)
+        update_mosketch_button.clicked.connect(_update_mosketch)
+        buttons_layout.addWidget(update_mosketch_button)
+
+        spacer = QtWidgets.QSpacerItem(10, 20)
+
+        self.status_text = QtWidgets.QLabel(content)
+        self.status_text.setWordWrap(True)
+        self.status_text.setText("Not connected yet")
+
+        content.setLayout(main_layout)
+        main_layout.addWidget(help_text)
+        main_layout.addLayout(ip_layout)
+        main_layout.addLayout(buttons_layout)
+        self.setCentralWidget(content)
+        main_layout.addSpacerItem(spacer)
+        main_layout.addWidget(self.status_text)
+
+    def closeEvent(self, event):
+        _close_connection()
+
+
 ################################################################################
 ##########          GUI
 ################################################################################
 def _create_gui():
     global MAIN_WINDOW
-    global STATUS_TEXT
-
-    maya_window = _get_maya_main_window()
-    MAIN_WINDOW = QtWidgets.QMainWindow(maya_window)
-    MAIN_WINDOW.setWindowTitle(MODEL_NAME + " 0.55")
-    MAIN_WINDOW.destroyed.connect(_close_connection)
-
-    content = QtWidgets.QWidget(MAIN_WINDOW)
-    main_layout = QtWidgets.QVBoxLayout(content)
-
-    help_text = QtWidgets.QLabel(content)
-    help_text.setWordWrap(True)
-
-    help_text.setText("""<br>
-    <b>Please read <a href='https://github.com/MokaStudio/MosketchForMaya' style=\"color: #F16521;\"> documentation</a> first.</b>
-    <br>""")
-    help_text.setOpenExternalLinks(True)
-
-    ip_label = QtWidgets.QLabel("IP", content)
-    ip_lineedit = QtWidgets.QLineEdit(content)
-    ip_lineedit.setText(IP)
-    ip_lineedit.textChanged.connect(_ip_text_changed)
-    ip_layout = QtWidgets.QHBoxLayout()
-    ip_layout.addWidget(ip_label)
-    ip_layout.addWidget(ip_lineedit)
-
-    buttons_layout = QtWidgets.QHBoxLayout()
-    connect_button = QtWidgets.QToolButton(content)
-    connect_button.setText("CONNECT")
-    connect_button.clicked.connect(_open_connection)
-    buttons_layout.addWidget(connect_button)
-    disconnect_button = QtWidgets.QToolButton(content)
-    disconnect_button.setText("DISCONNECT")
-    disconnect_button.clicked.connect(_close_connection)
-    buttons_layout.addWidget(disconnect_button)
-    update_mosketch_button = QtWidgets.QToolButton(content)
-    update_mosketch_button.setText("UPDATE MOSKETCH")
-    update_mosketch_button.setCheckable(False)
-    update_mosketch_button.clicked.connect(_update_mosketch)
-    buttons_layout.addWidget(update_mosketch_button)
-
-    spacer = QtWidgets.QSpacerItem(10, 20)
-
-    STATUS_TEXT = QtWidgets.QLabel(content)
-    STATUS_TEXT.setWordWrap(True)
-    STATUS_TEXT.setText("Not connected yet")
-
-    content.setLayout(main_layout)
-    main_layout.addWidget(help_text)
-    main_layout.addLayout(ip_layout)
-    main_layout.addLayout(buttons_layout)
-    MAIN_WINDOW.setCentralWidget(content)
-    main_layout.addSpacerItem(spacer)
-    main_layout.addWidget(STATUS_TEXT)
+    
+    MAIN_WINDOW = UI_MosketchWindow()
+    MAIN_WINDOW.init_mosketch_ui()
+    MAIN_WINDOW.show()    
 
     _print_verbose(sys.version, 1)
     _print_verbose(sys.getdefaultencoding(), 2)
@@ -196,11 +243,17 @@ def _create_gui():
     _print_verbose(sys.prefix, 2)
     _print_verbose(locale.getdefaultlocale(), 2)
     
-    MAIN_WINDOW.show()
 
+################################################################################
+##########          Destroy GUI
+################################################################################
 def _destroy_gui():
     MAIN_WINDOW.close()
 
+
+################################################################################
+##########          Return main window
+################################################################################
 def _get_maya_main_window():
     OpenMayaUI.MQtUtil.mainWindow()
     ptr = OpenMayaUI.MQtUtil.mainWindow()
@@ -211,24 +264,27 @@ def _get_maya_main_window():
     assert isinstance(window, QtWidgets.QMainWindow)
     return window
 
+
+################################################################################
+##########          Change IP text
+################################################################################
 def _ip_text_changed(text):
     global IP
     IP = text
 
-# Helpers
-def _print_error(error):
-    global STATUS_TEXT
 
+################################################################################
+##########          Helpers
+################################################################################
+def _print_error(error):
     error_msg = "ERROR: " + error
     print error_msg
-    STATUS_TEXT.setText(error_msg)
+    MAIN_WINDOW.status_text.setText(error_msg)
 
 def _print_success(success):
-    global STATUS_TEXT
-
     success_msg = "SUCCESS: " + success
     print success_msg
-    STATUS_TEXT.setText(success_msg)
+    MAIN_WINDOW.status_text.setText(success_msg)
 
 def _print_encoding(string):
     if isinstance(string, str):
@@ -325,23 +381,58 @@ def _update_mosketch():
     We send "full" local rotations and local translations.
     So we need to add rotate axis and joint orient.
     '''
-    global JOINTS_BUFFER
-    global JOINTS_INIT_ORIENT_INV_BUFFER
-    global JOINTS_ROTATE_AXIS_INV_BUFFER
-
-    global JSON_KEY_TYPE
-    global JSON_KEY_NAME
-    global JSON_KEY_ROTATION
-    global JSON_KEY_TRANSLATION
 
     # Useless to prepare the data if we have no connection
     if CONNECTION is None:
         _print_error("Mosketch is not connected!")
         return
+
+    if ((MODEL_NAME == "Mosko_Rigged") or (MODEL_NAME == "DeepSea_Rigged")):
+        _update_mosketch_from_controllers()
+        return
+
     # For every joint, pack data, then send packet
     try:
         quat = pmc.datatypes.Quaternion()
         joints_buffer_values = JOINTS_BUFFER.values()
+        joints_stream = {}
+        joints_stream[JSON_KEY_TYPE] = "JointsStream"
+        joints_stream[JSON_KEY_JOINTS] = []
+        for maya_joint in joints_buffer_values:
+            joint_data = {} # Reinit it
+            joint_name = maya_joint.name()
+
+            joint_data[JSON_KEY_NAME] = joint_name # Fill the Json key for the name
+
+            # W = [S] * [RO] * [R] * [JO] * [IS] * [T]
+            RO = JOINTS_ROTATE_AXIS_INV_BUFFER[joint_name].inverse()
+            JO = JOINTS_INIT_ORIENT_INV_BUFFER[joint_name].inverse()
+            quat = maya_joint.getRotation(space='transform', quaternion=True)
+            quat = RO * quat * JO
+            joint_data[JSON_KEY_ROTATION] = [quat[0], quat[1], quat[2], quat[3]]
+
+            translation = maya_joint.getTranslation(space='transform')
+            translation *= 0.01 # Mosketch uses meters. Maya uses centimeters
+            joint_data[JSON_KEY_TRANSLATION] = [translation[0], translation[1], translation[2]]
+            joints_stream[JSON_KEY_JOINTS].append(joint_data)
+        json_data = json.dumps(joints_stream)
+        CONNECTION.write(json_data)
+    except Exception, e:
+        _print_error("cannot send joint value (" + str(e) + ")")
+
+
+################################################################################
+##########          SEND CONTROLLERS
+################################################################################
+def _update_mosketch_from_controllers():
+    '''
+    We send "full" local rotations and local translations.
+    So we need to add rotate axis and joint orient.
+    '''
+    # For every joint, pack data, then send packet
+    try:
+        quat = pmc.datatypes.Quaternion()
+        joints_buffer_values = CONTROLLERS_BUFFER.values()
         joints_stream = {}
         joints_stream[JSON_KEY_TYPE] = "JointsStream"
         joints_stream[JSON_KEY_JOINTS] = []
@@ -358,15 +449,15 @@ def _update_mosketch():
                   joint_data[JSON_KEY_NAME] = idxName # Fill the Json key for the name
                   # For this controller we need to take an offset into account
                   if (MODEL_NAME == "Mosko_Rigged"):
-                      offset = ROOTS_SYSTEM["RootCenter_M"];
+                      offset = ROOTS_SYSTEM["RootCenter_M"]
                   elif (MODEL_NAME == "DeepSea_Rigged"):
-                      offset = ROOTS_SYSTEM["RootOffsetX_M"];
+                      offset = ROOTS_SYSTEM["RootOffsetX_M"]
                   oT = offset.getTranslation(space='transform')
                   # The root controller has a pre transform
-                  offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
+                  offset = ROOTS_SYSTEM["FKOffsetRoot_M"]
                   oJO = offset.getRotation(space='transform', quaternion=True)
-                  RO = JOINTS_ROTATE_AXIS_INV_BUFFER[idxName].inverse()
-                  JO = JOINTS_INIT_ORIENT_INV_BUFFER[idxName].inverse()
+                  RO = CONTROLLERS_ROTATE_AXIS_INV_BUFFER[idxName].inverse()
+                  JO = CONTROLLERS_INIT_ORIENT_INV_BUFFER[idxName].inverse()
                   quat = maya_joint.getRotation(space='transform', quaternion=True)
                   quat = oJO * RO * quat * JO * oJO.inverse()
                   joint_data[JSON_KEY_ROTATION] = [quat[0], quat[1], quat[2], quat[3]]
@@ -381,10 +472,14 @@ def _update_mosketch():
             joint_data[JSON_KEY_NAME] = idxName # Fill the Json key for the name
 
             # W = [S] * [RO] * [R] * [JO] * [IS] * [T]
-            RO = JOINTS_ROTATE_AXIS_INV_BUFFER[idxName].inverse()
-            JO = JOINTS_INIT_ORIENT_INV_BUFFER[idxName].inverse()
+            RO = CONTROLLERS_ROTATE_AXIS_INV_BUFFER[idxName].inverse()
+            JO = CONTROLLERS_INIT_ORIENT_INV_BUFFER[idxName].inverse()
             quat = maya_joint.getRotation(space='transform', quaternion=True)
             quat = RO * quat * JO
+           
+            #extra = _compute_extra(idxName)
+            #quat = extra*quat
+
             joint_data[JSON_KEY_ROTATION] = [quat[0], quat[1], quat[2], quat[3]]
 
             translation = maya_joint.getTranslation(space='transform')
@@ -502,63 +597,69 @@ def _process_hierarchy(hierarchy_data):
     global JOINTS_BUFFER
     global JOINTS_INIT_ORIENT_INV_BUFFER
     global JOINTS_ROTATE_AXIS_INV_BUFFER
+    global CONTROLLERS_BUFFER
+    global CONTROLLERS_INIT_ORIENT_INV_BUFFER
+    global CONTROLLERS_ROTATE_AXIS_INV_BUFFER
 
     try:
         # First empty JOINTS_BUFFER
         JOINTS_BUFFER = {}
         JOINTS_INIT_ORIENT_INV_BUFFER = {}
         JOINTS_ROTATE_AXIS_INV_BUFFER = {}
+        CONTROLLERS_BUFFER = {}
+        CONTROLLERS_INIT_ORIENT_INV_BUFFER = {}
+        CONTROLLERS_ROTATE_AXIS_INV_BUFFER = {}
 
         # Retrieve all joints from Maya and Transforms (we may be streaming to controllers too)
-        all_maya_joints = pmc.ls(type="transform")
+        all_maya_joints = pmc.ls(type="joint")
+        all_maya_transform = pmc.ls(type="transform")
 
         # Then from all joints in the hierarchy, lookup in maya joints
         joints_name = hierarchy_data["Joints"]
 
         for joint_name in joints_name:
             # In Advanced Skeleton Joint's controllers are prefixed with 'FK'
-            prefixedName = PREFIX_FK + joint_name
+            prefixed_name = PREFIX_FK + joint_name
             # except for RooX_M which we want as is
             if joint_name == "RootX_M":
-                prefixedName = joint_name
+                prefixed_name = joint_name
             # We are also missing controllers for end toes in Mosko, so we plug joint onto joint
             if (MODEL_NAME == "Mosko_Rigged"):
                 if (joint_name == 'ToesEnd_L'):
-                    prefixedName = 'ToesEnd_L'
+                    prefixed_name = 'ToesEnd_L'
                 if (joint_name == 'ToesEnd_R'):
-                    prefixedName = 'ToesEnd_R'
-            # Now we specifically plug our joints on controllers (so controllers will take rotations of our joints)
-            # Call any specific function here
-            #---
-            '''
-            ### This was valid for the old mosketch model (pre 5.1)
-            if (joint_name == "Neck_M"):
-                prefixedName = PREFIX_FKX + joint_name
-            if (joint_name == "NeckPart1_M"):
-                prefixedName = PREFIX_FKX + joint_name
-            if (joint_name == "NeckPart2_M"):
-                prefixedName = PREFIX_FKX + joint_name
-            '''
-            #if (joint_name == "Shoulder_L"):
-                #prefixedName = 'Character1_Ctrl_LeftShoulderEffector'
-
+                    prefixed_name = 'ToesEnd_R'
             if (MODEL_NAME == "DeepSea_Rigged"):
-                prefixedName = _deepsea_controllers(joint_name)
-            #---
-            maya_joints = [maya_joint for maya_joint in all_maya_joints if maya_joint.name() == prefixedName]
+                prefixed_name = _deepsea_controllers(joint_name)
+
+            # We store joints in any cases
+            maya_real_joints = [maya_joint for maya_joint in all_maya_joints if maya_joint.name() == joint_name]
+            if maya_real_joints:
+                # We should have one Maya joint mapped anyways
+                if len(maya_real_joints) != 1:
+                    _print_error("We should have 1 Maya joint mapped only. Taking the first one only.")                
+                _map_joint(joint_name, maya_real_joints[0])
+
+            # Then we store controllers, there might be somle joints too for simplicity
+            maya_joints = [maya_joint for maya_joint in all_maya_transform if maya_joint.name() == prefixed_name]
             if maya_joints:
                 # We should have one Maya joint mapped anyways
                 if len(maya_joints) != 1:
                     _print_error("We should have 1 Maya joint mapped only. Taking the first one only.")
-                
-                maya_joint = maya_joints[0]
-                _map_joint(joint_name, maya_joint)
+                _map_controller(joint_name, maya_joints[0])
+
+        # If no mapping close connection
+        if (len(JOINTS_BUFFER) == 0):
+            _close_connection()
+            _print_error("Couldn't map joints. Check Maya's namespaces maybe.")
+            return
 
         _send_ack_hierarchy_initialized()
 
         # Print nb joints in Maya and nb joints in BUFFER for information purposes
-        _print_success("mapped " + str(len(JOINTS_BUFFER)) + " maya joints out of " + str(len(all_maya_joints)))
+        _print_success("mapped " + str(len(JOINTS_BUFFER)) + " maya joints out of " + str(len(all_maya_transform)))
         _print_success("Buffers size: " + str(len(JOINTS_BUFFER)) + " / " + str(len(JOINTS_ROTATE_AXIS_INV_BUFFER)) + " / " + str(len(JOINTS_INIT_ORIENT_INV_BUFFER)))
+        _print_verbose('Joints buffer = ' + str(len(JOINTS_BUFFER)) + ', controllers buffer = ' + str(len(CONTROLLERS_BUFFER)), 1)
 
     except Exception as e:
         _print_error("cannot process hierarchy data (" + type(e).__name__ + ": " + str(e) +")")
@@ -569,6 +670,10 @@ def _process_hierarchy(hierarchy_data):
         _send_command_orientMode(1)
     elif (MODEL_NAME == "Mosko_Rigged"):
         _send_command_orientMode(0)
+
+    # Sepcify in which space we want to work. Default is Local
+    _send_command_jointSpace("Local")
+    #_send_command_jointSpace("World")
 
     # Look for our root offset
     _fill_root_system()
@@ -591,7 +696,28 @@ def _map_joint(mosketch_name, maya_joint):
         # We have a Transform => Do NOT get joint_orient into account but the initial transform instead
         JO = maya_joint.getRotation(space='transform', quaternion=True).inverse()
         JOINTS_INIT_ORIENT_INV_BUFFER[mosketch_name] = JO
-        _print_verbose("t: " + mosketch_name + " - " + maya_joint.name() + " " + str(RO[0]) + " " + str(RO[1]) + " " + str(RO[2]) + " " + str(RO[3]) + "; " + str(JO[0]) + " " + str(JO[1]) + " " + str(JO[2]) + " " + str(JO[3]), 2)
+        #_print_verbose("t: " + mosketch_name + " - " + maya_joint.name() + " " + str(RO[0]) + " " + str(RO[1]) + " " + str(RO[2]) + " " + str(RO[3]) + "; " + str(JO[0]) + " " + str(JO[1]) + " " + str(JO[2]) + " " + str(JO[3]), 2)
+        _print_verbose("WARNING: we have a controller while we should have a joint: " + mosketch_name + " - " + maya_joint.name(), 1)
+
+
+################################################################################
+##########          This is filling arrays to map Mosketch name to a Maya controller
+################################################################################
+def _map_controller(mosketch_name, maya_controller):
+    CONTROLLERS_BUFFER[mosketch_name] = maya_controller
+    vRO = maya_controller.getRotateAxis()
+    RO = pmc.datatypes.EulerRotation(vRO[0], vRO[1], vRO[2]).asQuaternion()
+    CONTROLLERS_ROTATE_AXIS_INV_BUFFER[mosketch_name] = RO.inverse()
+    try:
+        # We have a Joint => Get joint_orient into account
+        JO = maya_controller.getOrientation().inverse()
+        CONTROLLERS_INIT_ORIENT_INV_BUFFER[mosketch_name] = JO
+        _print_verbose("WARNING: we have a joint while we should have a controller: " + mosketch_name + " - " + maya_controller.name(), 2)
+    except Exception:
+        # We have a Transform => Do NOT get joint_orient into account but the initial transform instead
+        JO = maya_controller.getRotation(space='transform', quaternion=True).inverse()
+        CONTROLLERS_INIT_ORIENT_INV_BUFFER[mosketch_name] = JO
+        _print_verbose("t: " + mosketch_name + " - " + maya_controller.name() + " " + str(RO[0]) + " " + str(RO[1]) + " " + str(RO[2]) + " " + str(RO[3]) + "; " + str(JO[0]) + " " + str(JO[1]) + " " + str(JO[2]) + " " + str(JO[3]), 2)
 
 
 ################################################################################
@@ -625,10 +751,9 @@ def _process_joints_stream(joints_stream_data):
     global JOINTS_INIT_ORIENT_INV_BUFFER
     global JOINTS_ROTATE_AXIS_INV_BUFFER
 
-    global JSON_KEY_NAME
-    global JSON_KEY_ANATOMIC
-    global JSON_KEY_ROTATION
-    global JSON_KEY_TRANSLATION
+    if ((MODEL_NAME == "Mosko_Rigged") or (MODEL_NAME == "DeepSea_Rigged")):
+        _process_controllers_stream(joints_stream_data)
+        return
 
     try:
         joints_data = joints_stream_data[JSON_KEY_JOINTS]
@@ -647,22 +772,67 @@ def _process_joints_stream(joints_stream_data):
                 quat = pmc.datatypes.Quaternion(joint_data[JSON_KEY_ROTATION])
                 rotate_axis_inv = JOINTS_ROTATE_AXIS_INV_BUFFER[joint_name]
                 joint_orient_inv = JOINTS_INIT_ORIENT_INV_BUFFER[joint_name]
-
-                if (MODEL_NAME == 'Mosko_Rigged'):
-                  if (joint_name == "RootX_M"):
-                      # The root controller has a pre transform
-                      offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
-                      oJO = offset.getRotation(space='transform', quaternion=True)
-                      quat = oJO.inverse() * rotate_axis_inv * quat * joint_orient_inv * oJO
-                if (MODEL_NAME == 'DeepSea_Rigged'):
-                  if (joint_name == "RootX_M"):
-                      # The root controller has a pre transform
-                      offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
-                      oJO = offset.getRotation(space='transform', quaternion=True)
-                      quat = oJO.inverse() * rotate_axis_inv * quat * joint_orient_inv * oJO
-                else:
-                    quat = rotate_axis_inv * quat * joint_orient_inv
+                quat = rotate_axis_inv * quat * joint_orient_inv
                 maya_joint.setRotation(quat, space='transform')
+                
+                joint_type = joint_data[JSON_KEY_ANATOMIC]                
+                if joint_type == 7: # This is a 6 DoFs joint so consider translation part too
+                    trans = pmc.datatypes.Vector(joint_data[JSON_KEY_TRANSLATION])
+                    trans = trans.rotateBy(rotate_axis_inv)
+                    # Mosketch uses meters. Maya uses centimeters
+                    trans *= 100
+                    maya_joint.setTranslation(trans, space='transform')
+
+        _send_ack_jointstream_received()
+    except KeyError as e:
+        _print_error("cannot find " + joint_name + " in maya")
+        return
+    except Exception as e:
+        _print_error("cannot process joints stream (" + type(e).__name__ + ": " + str(e) +")")
+
+
+################################################################################
+##########          We receive joints but we use name mapping
+################################################################################
+def _process_controllers_stream(joints_stream_data):
+    '''
+    We receive "full" local rotations and local translations.
+    So we need to substract rotate axis and joint orient.
+    '''
+    global CONTROLLERS_BUFFER
+    global CONTROLLERS_INIT_ORIENT_INV_BUFFER
+    global CONTROLLERS_ROTATE_AXIS_INV_BUFFER
+
+    try:
+        joints_data = joints_stream_data[JSON_KEY_JOINTS]
+        _print_verbose(joints_data, 3)
+
+        for joint_data in joints_data:
+            # We select all joints having the given name
+            joint_name = joint_data[JSON_KEY_NAME]
+            try:
+                maya_controller = CONTROLLERS_BUFFER[joint_name]
+            except KeyError:
+                #_print_error("cannot find " + joint_name + " in controllers")
+                continue
+
+            if maya_controller:
+                # W = [S] * [RO] * [R] * [JO] * [IS] * [T]
+                quat = pmc.datatypes.Quaternion(joint_data[JSON_KEY_ROTATION])
+                rotate_axis_inv = CONTROLLERS_ROTATE_AXIS_INV_BUFFER[joint_name]
+                orient_inv = CONTROLLERS_INIT_ORIENT_INV_BUFFER[joint_name]
+
+                if (joint_name == "RootX_M"):
+                    # The root controller has a pre transform
+                    offset = ROOTS_SYSTEM["FKOffsetRoot_M"];
+                    oJO = offset.getRotation(space='transform', quaternion=True)
+                    quat = oJO.inverse() * rotate_axis_inv * quat * orient_inv * oJO
+                    maya_controller.setRotation(quat, space='transform')
+                else:
+                    #extra = _compute_extra(joint_name)
+                    #quat = quat * extra.inverse()
+                    quat = rotate_axis_inv * quat * orient_inv
+                    maya_controller.setRotation(quat, space='transform')
                 
                 joint_type = joint_data[JSON_KEY_ANATOMIC]                
                 if joint_type == 7: # This is a 6 DoFs joint so consider translation part too
@@ -682,7 +852,7 @@ def _process_joints_stream(joints_stream_data):
                             oT = offset.getTranslation(space='transform')
                             trans -= oT
 
-                    maya_joint.setTranslation(trans, space='transform')
+                    maya_controller.setTranslation(trans, space='transform')
 
         _send_ack_jointstream_received()
     except KeyError as e:
@@ -839,6 +1009,28 @@ def _send_command_addEffector():
 
 
 ################################################################################
+##########          Set if we want Mosketch transform in local or world space
+#in space_mode ["Local" or "World"]
+################################################################################
+def _send_command_jointSpace(space_mode):
+    global CONNECTION
+
+    packet = {}
+    packet[JSON_KEY_TYPE] = "JsonPacket"
+    packet['object'] = 'scene'
+    packet['command'] = 'setStreamingJointSpace'
+
+    jsonObj = {}
+    jsonObj['jointSpace'] = str(space_mode)
+    packet[JSON_KEY_PARAMETERS] = jsonObj # we need parameters to be a json object
+
+    json_data = json.dumps([packet]) # [] specific for commands that could be buffered
+    CONNECTION.write(json_data)
+    CONNECTION.flush()
+    _print_verbose("_send_command_jointSpace", 1)
+
+
+################################################################################
 ##########          Set initial states according to the model (pre connection)
 ################################################################################
 def _initial_settings():
@@ -857,7 +1049,7 @@ def _initial_settings():
 
 ################################################################################
 ##########          If you need any pre transform, fill it here
-##########          Provided as an example (Might differ with models)
+##########          Provided as an example (Might differ with models as shown)
 ################################################################################
 def _fill_root_system():
     if (MODEL_NAME == 'Mosko_Rigged'):
@@ -889,213 +1081,67 @@ def _fill_root_system():
 ##########          Return the controller name for the associated joint_name
 ################################################################################
 def _deepsea_controllers(joint_name):
-    global MODEL_NAME
-    global PREFIX_FK
-    global PREFIX_FKX
+    prefixed_name = PREFIX_FK + joint_name
 
-    prefixedName = PREFIX_FK + joint_name
-    # except for RooX_M which we want as is
+    # except for RooX_M which we want as is with no prefix
     if joint_name == "RootX_M":
-        prefixedName = joint_name
-        return prefixedName
+        prefixed_name = joint_name
+        return prefixed_name
 
-    if (joint_name == "BodyFinSide2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide2Part1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide2Part2_L"):
-        prefixedName = PREFIX_FKX + joint_name
+    # except for the joints we want to map directly on FKX joints
+    names = [name for name in DEEPSEA_FKX_BIND if name == joint_name]
+    if len(names) > 0:
+        prefixed_name = PREFIX_FKX + joint_name
 
-    if (joint_name == "BodyFinSide3_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide3Part1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide3Part2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "finSide_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSidePart1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSidePart2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "finSide2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide2Part1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide2Part2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "finSide4_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide4Part1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide4Part2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerA_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerAPart1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerAPart2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerA1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerA1Part1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerA1Part2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerB_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerBPart1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerBPart2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerB1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerB1Part1_L"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerB1Part2_L"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BackE_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BackEPart1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BackEPart2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BackEPart3_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BackEPart4_M"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "tailMain1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain1Part1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain1Part2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain1Part3_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain1Part4_M"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "tailMain2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain2Part1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain2Part2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain2Part3_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain2Part4_M"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "tailMain3_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain3Part1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain3Part2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain3Part3_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain3Part4_M"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "tailMain4_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain4Part1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain4Part2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain4Part3_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "tailMain4Part4_M"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinUpper4_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinUpper4Part1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinUpper4Part2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinUpper5_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinUpper5Part1_M"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinUpper5Part2_M"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinSide2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide2Part1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide2Part2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinSide3_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide3Part1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinSide3Part2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "finSide_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSidePart1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSidePart2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "finSide2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide2Part1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide2Part2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "finSide4_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide4Part1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "finSide4Part2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerA_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerAPart1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerAPart2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerA1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerA1Part1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerA1Part2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerB_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerBPart1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerBPart2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    if (joint_name == "BodyFinLowerB1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerB1Part1_R"):
-        prefixedName = PREFIX_FKX + joint_name
-    elif (joint_name == "BodyFinLowerB1Part2_R"):
-        prefixedName = PREFIX_FKX + joint_name
-
-    return prefixedName
+    return prefixed_name
 
 
 ################################################################################
 ################################################################################
+def _compute_extra(joint_name):
+    global JOINTS_BUFFER
+    global JOINTS_ROTATE_AXIS_INV_BUFFER
+    global JOINTS_INIT_ORIENT_INV_BUFFER
+
+    #maya_joint = JOINTS_BUFFER[joint_name]
+
+    # First compute X (= extra transformation)
+    # X = P^-1 * G * L^-1
+#    parent_joint = maya_joint.getParent()
+ #   P_inv = parent_joint.getRotation(space='world', quaternion=True).inverse()
+
+  #  G = maya_joint.getRotation(space='world', quaternion=True)
+
+    X = pmc.datatypes.EulerRotation(0, 0, 0).asQuaternion()
+
+    if (joint_name == 'ThumbFinger1_L'):
+        print joint_name
+        #all_maya_joints = pmc.ls(type="joint")
+        #thumb_joints = [maya_joint for maya_joint in all_maya_joints if maya_joint.name() == 'ThumbFinger1_L']
+        #thumb_joint = thumb_joints[0]
+        #L = thumb_joint.getRotation(space='transform', quaternion=True)
+        #vRO = maya_joint.getRotateAxis()
+        #RO = pmc.datatypes.EulerRotation(vRO[0], vRO[1], vRO[2]).asQuaternion()
+        #JO = maya_joint.getOrientation()
+
+        try:
+            thumb_joint = JOINTS_BUFFER[joint_name]
+        except KeyError as e:
+            _print_error("cannot find " + joint_name + " in buffers" + ": " + str(e))
+            return X
+
+        L = thumb_joint.getRotation(space='transform', quaternion=True)
+        RO = JOINTS_ROTATE_AXIS_INV_BUFFER[joint_name]
+        JO = JOINTS_INIT_ORIENT_INV_BUFFER[joint_name]
+
+        L = RO * L * JO
+        X = L
+
+        M = X
+        M_euler = M.asEulerRotation()
+        print M_euler[0]*180/3.1415926535897932384626433832795
+        print M_euler[1]*180/3.1415926535897932384626433832795
+        print M_euler[2]*180/3.1415926535897932384626433832795
+
+    return X
+
