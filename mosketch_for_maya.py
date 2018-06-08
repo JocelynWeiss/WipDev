@@ -13,6 +13,7 @@ import json
 import pymel.core as pmc
 import maya.OpenMayaUI as OpenMayaUI
 import maya.mel as mel
+import socket
 
 # Support for Qt4 and Qt5 depending on Maya version
 from Qt import QtCore
@@ -46,6 +47,9 @@ JSON_KEY_JOINTS = "Joints"
 JSON_KEY_OBJECT = "object"
 JSON_KEY_COMMAND = "command"
 JSON_KEY_PARAMETERS = "parameters"
+
+# Packet Type
+PACKET_TYPE_COMMAND = "NetCommand"
 
 # MAYA JOINTS BUFFERS
 JOINTS_BUFFER = {}
@@ -224,7 +228,9 @@ class UI_MosketchWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(self.status_text)
 
     def closeEvent(self, event):
-        _close_connection()
+        # Close connection if any is still opened
+        if CONNECTION is not None:
+          _close_connection()
 
 
 ################################################################################
@@ -317,6 +323,13 @@ def _open_connection():
     if CONNECTION is not None:
         _print_error("connection is already opened.")
         return
+
+    # Test IP format
+    if (is_valid_ipv4_address(IP) == False):
+        _print_error('IP address looks wrong, please enter a valid IP address')
+        return
+    else:
+        _print_success('Connecting to ' + IP)
 
     # Perform initial settings (pre connection)
     _initial_settings()
@@ -438,15 +451,15 @@ def _update_mosketch_from_controllers():
         joints_stream[JSON_KEY_JOINTS] = []
         for maya_joint in joints_buffer_values:
             joint_data = {} # Reinit it
-            idxName = maya_joint.name()
+            idx_name = maya_joint.name()
 
             if ((MODEL_NAME == "Mosko_Rigged") or (MODEL_NAME == "DeepSea_Rigged")):
-              if idxName.startswith(PREFIX_FKX):
-                  idxName = idxName.replace(PREFIX_FKX, "", 1)
-              elif idxName.startswith(PREFIX_FK):
-                  idxName = idxName.replace(PREFIX_FK, "", 1)
-              elif idxName == "RootX_M":
-                  joint_data[JSON_KEY_NAME] = idxName # Fill the Json key for the name
+              if idx_name.startswith(PREFIX_FKX):
+                  idx_name = idx_name.replace(PREFIX_FKX, "", 1)
+              elif idx_name.startswith(PREFIX_FK):
+                  idx_name = idx_name.replace(PREFIX_FK, "", 1)
+              elif idx_name == "RootX_M":
+                  joint_data[JSON_KEY_NAME] = idx_name # Fill the Json key for the name
                   # For this controller we need to take an offset into account
                   if (MODEL_NAME == "Mosko_Rigged"):
                       offset = ROOTS_SYSTEM["RootCenter_M"]
@@ -456,8 +469,8 @@ def _update_mosketch_from_controllers():
                   # The root controller has a pre transform
                   offset = ROOTS_SYSTEM["FKOffsetRoot_M"]
                   oJO = offset.getRotation(space='transform', quaternion=True)
-                  RO = CONTROLLERS_ROTATE_AXIS_INV_BUFFER[idxName].inverse()
-                  JO = CONTROLLERS_INIT_ORIENT_INV_BUFFER[idxName].inverse()
+                  RO = CONTROLLERS_ROTATE_AXIS_INV_BUFFER[idx_name].inverse()
+                  JO = CONTROLLERS_INIT_ORIENT_INV_BUFFER[idx_name].inverse()
                   quat = maya_joint.getRotation(space='transform', quaternion=True)
                   quat = oJO * RO * quat * JO * oJO.inverse()
                   joint_data[JSON_KEY_ROTATION] = [quat[0], quat[1], quat[2], quat[3]]
@@ -469,15 +482,15 @@ def _update_mosketch_from_controllers():
                   joints_stream[JSON_KEY_JOINTS].append(joint_data)
                   continue
 
-            joint_data[JSON_KEY_NAME] = idxName # Fill the Json key for the name
+            joint_data[JSON_KEY_NAME] = idx_name # Fill the Json key for the name
 
             # W = [S] * [RO] * [R] * [JO] * [IS] * [T]
-            RO = CONTROLLERS_ROTATE_AXIS_INV_BUFFER[idxName].inverse()
-            JO = CONTROLLERS_INIT_ORIENT_INV_BUFFER[idxName].inverse()
+            RO = CONTROLLERS_ROTATE_AXIS_INV_BUFFER[idx_name].inverse()
+            JO = CONTROLLERS_INIT_ORIENT_INV_BUFFER[idx_name].inverse()
             quat = maya_joint.getRotation(space='transform', quaternion=True)
             quat = RO * quat * JO
            
-            #extra = _compute_extra(idxName)
+            #extra = _compute_extra(idx_name)
             #quat = extra*quat
 
             joint_data[JSON_KEY_ROTATION] = [quat[0], quat[1], quat[2], quat[3]]
@@ -506,7 +519,7 @@ def _send_ack_hierarchy_initialized():
     try:
         ack_packet = {}
         ack_packet['Type'] = "AckHierarchyInitialized"
-        json_data = json.dumps(ack_packet)
+        json_data = json.dumps([ack_packet])
         CONNECTION.write(json_data)
         CONNECTION.flush()
         _print_verbose("AckHierarchyInitialized sent", 1)
@@ -546,6 +559,7 @@ def _got_data():
         - Type == "Hierarchy" => Initialize skeleton
         - Type == "JointsStream" => Copy paste received values on Maya's joints
         - Type == "JointsUuids" => Receiving Mosketch UUIDs for all joints
+        - Type == "NetCommand" => Packet type to send Mosketch commands
     """
     try:
         raw_data = CONNECTION.readLine()
@@ -869,7 +883,7 @@ def _process_controllers_stream(joints_stream_data):
 def _send_command_orientMode(orient_mode):
     global CONNECTION
     packet = {}
-    packet[JSON_KEY_TYPE] = "JsonPacket"
+    packet[JSON_KEY_TYPE] = PACKET_TYPE_COMMAND
     packet[JSON_KEY_OBJECT] = 'scene'
     packet[JSON_KEY_COMMAND] = 'setStreamingJointOrientMode'
 
@@ -890,7 +904,7 @@ def _send_command_orientMode(orient_mode):
 def _send_command_wireframe(visible):
     global CONNECTION
     packet = {}
-    packet[JSON_KEY_TYPE] = "JsonPacket"
+    packet[JSON_KEY_TYPE] = PACKET_TYPE_COMMAND
     packet[JSON_KEY_OBJECT] = 'scene'
     packet[JSON_KEY_COMMAND] = 'setWireframeVisibility'
 
@@ -943,7 +957,7 @@ def _process_joints_uuids(data):
 def _send_command_setSketchable(uuid, sketchable):
     global CONNECTION
     packet = {}
-    packet[JSON_KEY_TYPE] = "JsonPacket"
+    packet[JSON_KEY_TYPE] = PACKET_TYPE_COMMAND
     packet[JSON_KEY_OBJECT] = 'joint'
     packet[JSON_KEY_COMMAND] = 'setSketchable'
 
@@ -972,7 +986,7 @@ def _send_command_selectJoint(joint_name):
         return
 
     packet = {}
-    packet[JSON_KEY_TYPE] = "JsonPacket"
+    packet[JSON_KEY_TYPE] = PACKET_TYPE_COMMAND
     packet[JSON_KEY_OBJECT] = 'scene'
     packet[JSON_KEY_COMMAND] = 'selectByUuid'
 
@@ -995,7 +1009,7 @@ def _send_command_addEffector():
     global CONNECTION
 
     packet = {}
-    packet[JSON_KEY_TYPE] = "JsonPacket"
+    packet[JSON_KEY_TYPE] = PACKET_TYPE_COMMAND
     packet['object'] = 'scene'
     packet['command'] = 'attachNumIKEffector'
 
@@ -1016,7 +1030,7 @@ def _send_command_jointSpace(space_mode):
     global CONNECTION
 
     packet = {}
-    packet[JSON_KEY_TYPE] = "JsonPacket"
+    packet[JSON_KEY_TYPE] = PACKET_TYPE_COMMAND
     packet['object'] = 'scene'
     packet['command'] = 'setStreamingJointSpace'
 
@@ -1145,3 +1159,52 @@ def _compute_extra(joint_name):
 
     return X
 
+
+################################################################################
+##########          return 3 euler angle from a quaternion
+################################################################################
+def quat_to_deg(quat):
+    vec = quat.asEulerRotation()
+    vec = vec * (180.0 / 3.1415926535897932384626433832795)
+    return vec
+
+
+################################################################################
+##########          print a quaternion as 3 euler angles
+################################################################################
+def print_quat_deg(name, quat):
+    vec = quat_to_deg(quat)
+    print name + '= ' + str(vec[0]) + ' ' + str(vec[1]) + ' ' + str(vec[2])
+
+
+################################################################################
+##########          ...
+################################################################################
+def is_valid_ipv4_address(address):
+    try:
+        socket.inet_pton(socket.AF_INET, address)
+    except AttributeError:  # no inet_pton here, sorry
+        try:
+            socket.inet_aton(address)
+        except socket.error:
+            return False
+        return address.count('.') == 3
+    except socket.error:  # not a valid address
+        return False
+    return True
+
+
+################################################################################
+##########          ...
+################################################################################
+def is_valid_ipv6_address(address):
+    try:
+        socket.inet_pton(socket.AF_INET6, address)
+    except socket.error:  # not a valid address
+        return False
+    return True
+
+
+################################################################################
+##########          ...
+################################################################################
